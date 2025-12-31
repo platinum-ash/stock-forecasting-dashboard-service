@@ -3,6 +3,7 @@ import pandas as pd
 from typing import List, Dict, Optional
 from config import config
 import streamlit as st
+import logging
 
 @st.cache_resource(ttl=300)
 def get_db_connection():
@@ -69,6 +70,7 @@ def get_pipeline_status() -> Dict:
         }
     
     except Exception as e:
+        logging.error(e)
         return {"status": "error", "message": f"Status check failed: {e}"}
 
 @st.cache_data(ttl=30)
