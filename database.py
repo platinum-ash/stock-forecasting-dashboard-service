@@ -76,7 +76,8 @@ def fetch_series_list() -> List[str]:
     """Fetch available series from preprocessed table"""
     status = get_pipeline_status()
     
-    if status["series_count"] == 0:
+    # Sicheren Zugriff mit .get()
+    if status.get("series_count", 0) == 0:
         return []
     
     conn = get_db_connection()

@@ -2,6 +2,7 @@ import requests
 import streamlit as st
 from config import config
 from typing import Dict
+import pandas as pd
 
 def trigger_data_ingestion(series_id: str) -> bool:
     """Trigger Kafka ingestion for new series"""
