@@ -11,8 +11,8 @@ def trigger_data_ingestion(series_id: str) -> bool:
     st.info(f"Triggering data ingestion for {series_id}...")
     
     params = {
-        "interval": "5m",
-        "period": "3mo"
+        "interval": "30m",
+        "period": "2mo"
     }
     
     try:
