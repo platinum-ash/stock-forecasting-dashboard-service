@@ -1,19 +1,19 @@
 import os
 from dataclasses import dataclass, field
 from typing import List
-
+from urllib.parse import urlparse
 
 @dataclass
 class Config:
-    # Database
-    DATABASE_HOST: str = os.getenv("DATABASE_HOST", "timescaledb")
-    DATABASE_PORT: int = int(os.getenv("DATABASE_PORT", "5432"))
-    DATABASE_NAME: str = os.getenv("DATABASE_NAME", "timeseries")
-    DATABASE_USER: str = os.getenv("DATABASE_USER", "tsuser")
-    DATABASE_PASSWORD: str = os.getenv("DATABASE_PASSWORD", "ts_password")
+    # Database URLs (PostgreSQL connection strings)
+    STATUS_DATABASE_URL: str = os.getenv("STATUS_DATABASE_URL", "postgresql://tsuser:ts_password@timescaledb:5432/timeseries")
+    INGESTION_DATABASE_URL: str = os.getenv("INGESTION_DATABASE_URL", "postgresql://tsuser:ts_password@ingestion-db:5432/ingestion")
+    PREPROCESSING_DATABASE_URL: str = os.getenv("PREPROCESSING_DATABASE_URL", "postgresql://tsuser:ts_password@preprocessing-db:5432/preprocessing")
+    FORECASTING_DATABASE_URL: str = os.getenv("FORECASTING_DATABASE_URL", "postgresql://tsuser:ts_password@forecasting-db:5432/forecasting")
+    ANOMALY_DATABASE_URL: str = os.getenv("ANOMALY_DATABASE_URL", "postgresql://tsuser:ts_password@anomaly-db:5432/anomaly")
     
     # Services
-    INGESTION_SERVICE_URL: str = os.getenv("INGESTION_SERVICE_URL", "http://ingestion:8000")
+    INGESTION_SERVICE_URL: str = os.getenv("INGESTION_SERVICE_URL", "http://ingestion:8009/yahoo")
     PREPROCESSING_SERVICE_URL: str = os.getenv("PREPROCESSING_SERVICE_URL", "http://preprocessing:8000")
     FORECASTING_SERVICE_URL: str = os.getenv("FORECASTING_SERVICE_URL", "http://forecasting:8001")
     ANOMALY_SERVICE_URL: str = os.getenv("ANOMALY_SERVICE_URL", "http://anomaly:8002")
@@ -27,9 +27,7 @@ class Config:
     
     # Dashboard
     DASHBOARD_TITLE: str = "🔄 Event-Driven Time Series Pipeline"
-    AUTO_REFRESH_INTERVAL: int = int(os.getenv("AUTO_REFRESH_INTERVAL", "5"))  # seconds
+    AUTO_REFRESH_INTERVAL: int = int(os.getenv("AUTO_REFRESH_INTERVAL", "5"))
     JOB_HISTORY_LIMIT: int = int(os.getenv("JOB_HISTORY_LIMIT", "20"))
 
-
-# Global config instance
 config = Config()

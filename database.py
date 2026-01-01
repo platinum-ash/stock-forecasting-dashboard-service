@@ -1,59 +1,71 @@
 import psycopg2
 from psycopg2 import pool
 import pandas as pd
-from typing import List, Dict, Optional
+from typing import List, Dict
 from config import config
 import streamlit as st
 import logging
 
-
 @st.cache_resource
-def get_connection_pool():
-    """Create a persistent connection pool"""
+def get_connection_pool(db_type: str = "status"):
+    """Create persistent connection pools for different databases"""
     try:
+        db_url_map = {
+            "status": config.STATUS_DATABASE_URL.replace("postgresql+psycopg2://", "postgresql://"),
+            "ingestion": config.INGESTION_DATABASE_URL.replace("postgresql+psycopg2://", "postgresql://"),
+            "preprocessing": config.PREPROCESSING_DATABASE_URL.replace("postgresql+psycopg2://", "postgresql://"),
+            "forecasting": config.FORECASTING_DATABASE_URL.replace("postgresql+psycopg2://", "postgresql://"),
+            "anomaly": config.ANOMALY_DATABASE_URL.replace("postgresql+psycopg2://", "postgresql://")
+        }
+
+        
+        if db_type not in db_url_map:
+            raise ValueError(f"Unknown database type: {db_type}")
+        
+        db_url = db_url_map[db_type]
+        
         return pool.ThreadedConnectionPool(
             minconn=1,
             maxconn=10,
-            host=config.DATABASE_HOST,
-            port=config.DATABASE_PORT,
-            database=config.DATABASE_NAME,
-            user=config.DATABASE_USER,
-            password=config.DATABASE_PASSWORD,
+            dsn=db_url,
             connect_timeout=10
         )
     except Exception as e:
-        st.error(f"❌ Connection pool creation failed: {e}")
+        st.error(f"❌ Connection pool creation failed for {db_type}: {e}")
         return None
 
-
 def get_pipeline_status() -> Dict:
-    """Get comprehensive pipeline status"""
-    connection_pool = get_connection_pool()
-    if not connection_pool:
-        return {"status": "error", "message": "Database unavailable"}
+    """Get comprehensive pipeline status from multiple databases"""
+    status_pool = get_connection_pool("status")
+    ingestion_pool = get_connection_pool("ingestion")
+    preprocessing_pool = get_connection_pool("preprocessing")
     
-    conn = None
+    if not all([status_pool, ingestion_pool, preprocessing_pool]):
+        return {"status": "error", "message": "One or more databases unavailable"}
+    
+    conn_raw = None
+    conn_prep = None
     try:
-        conn = connection_pool.getconn()
-        cursor = conn.cursor()
+        # Get raw data count from ingestion database
+        conn_raw = ingestion_pool.getconn()
+        cursor_raw = conn_raw.cursor()
+        cursor_raw.execute("SELECT COUNT(*) FROM time_series_raw;")
+        raw_count = cursor_raw.fetchone()[0] or 0
+        cursor_raw.close()
         
-        # Raw data status
-        cursor.execute("SELECT COUNT(*) FROM time_series_raw;")
-        raw_count = cursor.fetchone()[0] or 0
+        # Get preprocessed data from preprocessing database
+        conn_prep = preprocessing_pool.getconn()
+        cursor_prep = conn_prep.cursor()
+        cursor_prep.execute("SELECT COUNT(*) FROM time_series_preprocessed;")
+        prep_count = cursor_prep.fetchone()[0] or 0
         
-        # Preprocessed status
-        cursor.execute("SELECT COUNT(*) FROM time_series_preprocessed;")
-        prep_count = cursor.fetchone()[0] or 0
-        
-        # Series availability
-        cursor.execute("""
+        cursor_prep.execute("""
             SELECT COUNT(DISTINCT series_id) as series_count
             FROM time_series_preprocessed 
             WHERE series_id IS NOT NULL
         """)
-        series_count = cursor.fetchone()[0] or 0
-        
-        cursor.close()
+        series_count = cursor_prep.fetchone()[0] or 0
+        cursor_prep.close()
         
         if series_count > 0:
             status = "ready"
@@ -75,29 +87,30 @@ def get_pipeline_status() -> Dict:
         }
     
     except Exception as e:
-        logging.error(e)
+        logging.error(f"Status check failed: {e}")
         return {"status": "error", "message": f"Status check failed: {e}"}
     
     finally:
-        if conn:
-            connection_pool.putconn(conn)
-
+        if conn_raw:
+            ingestion_pool.putconn(conn_raw)
+        if conn_prep:
+            preprocessing_pool.putconn(conn_prep)
 
 @st.cache_data(ttl=30)
 def fetch_series_list() -> List[str]:
-    """Fetch available series from preprocessed table"""
+    """Fetch available series from preprocessed database"""
     status = get_pipeline_status()
     
     if status.get("series_count", 0) == 0:
         return []
     
-    connection_pool = get_connection_pool()
-    if not connection_pool:
+    preprocessing_pool = get_connection_pool("preprocessing")
+    if not preprocessing_pool:
         return []
     
     conn = None
     try:
-        conn = connection_pool.getconn()
+        conn = preprocessing_pool.getconn()
         query = """
             SELECT DISTINCT series_id 
             FROM time_series_preprocessed 
@@ -111,18 +124,17 @@ def fetch_series_list() -> List[str]:
         return []
     finally:
         if conn:
-            connection_pool.putconn(conn)
-
+            preprocessing_pool.putconn(conn)
 
 def get_job_history(limit: int = 20) -> pd.DataFrame:
-    """Fetch recent pipeline job history"""
-    connection_pool = get_connection_pool()
-    if not connection_pool:
+    """Fetch recent pipeline job history from status database"""
+    status_pool = get_connection_pool("status")
+    if not status_pool:
         return pd.DataFrame()
     
     conn = None
     try:
-        conn = connection_pool.getconn()
+        conn = status_pool.getconn()
         query = """
             SELECT 
                 job_id,
@@ -144,18 +156,17 @@ def get_job_history(limit: int = 20) -> pd.DataFrame:
         return pd.DataFrame()
     finally:
         if conn:
-            connection_pool.putconn(conn)
-
+            status_pool.putconn(conn)
 
 def get_active_jobs() -> pd.DataFrame:
-    """Fetch currently running jobs"""
-    connection_pool = get_connection_pool()
-    if not connection_pool:
+    """Fetch currently running jobs from status database"""
+    status_pool = get_connection_pool("status")
+    if not status_pool:
         return pd.DataFrame()
     
     conn = None
     try:
-        conn = connection_pool.getconn()
+        conn = status_pool.getconn()
         query = """
             SELECT 
                 job_id,
@@ -174,22 +185,22 @@ def get_active_jobs() -> pd.DataFrame:
         return pd.DataFrame()
     finally:
         if conn:
-            connection_pool.putconn(conn)
-
+            status_pool.putconn(conn)
 
 def trigger_pipeline(series_id: str, config_data: Dict = None) -> Dict:
     """Trigger pipeline via ingestion service API"""
     import requests
     
     try:
-        payload = {
-            "series_id": series_id,
-            "preprocessing_config": config_data or {}
+
+        params = {
+            "interval": "5m",
+            "period": "3mo"
         }
         
-        response = requests.post(
-            f"{config.INGESTION_SERVICE_URL}/api/ingest",
-            json=payload,
+        response = requests.get(
+            f"{config.INGESTION_SERVICE_URL}/{series_id}/fetch_store",
+            params=params,
             timeout=10
         )
         response.raise_for_status()
