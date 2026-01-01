@@ -194,8 +194,8 @@ def trigger_pipeline(series_id: str, config_data: Dict = None) -> Dict:
     try:
 
         params = {
-            "interval": "30m",
-            "period": "2mo"
+            "interval": "5m",
+            "period": "5d"
         }
         
         response = requests.get(
