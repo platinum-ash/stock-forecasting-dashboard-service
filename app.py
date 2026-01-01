@@ -307,7 +307,7 @@ def main():
             st.success(f"✅ Analyzing **{selected_series}**")
             
             # Quick data preview
-            connection_pool = get_connection_pool()
+            connection_pool = get_connection_pool("preprocessing")
             if connection_pool:
                 conn = None
                 try:
