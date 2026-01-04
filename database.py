@@ -5,6 +5,22 @@ from typing import List, Dict
 from config import config
 import streamlit as st
 import logging
+from sqlalchemy import create_engine
+
+@st.cache_resource
+def get_engine(db_type: str = "status"):
+    """Return SQLAlchemy engine for a given database type."""
+    db_url_map = {
+        "status": config.STATUS_DATABASE_URL,
+        "ingestion": config.INGESTION_DATABASE_URL,
+        "preprocessing": config.PREPROCESSING_DATABASE_URL,
+        "forecasting": config.FORECASTING_DATABASE_URL,
+        "anomaly": config.ANOMALY_DATABASE_URL
+    }
+    if db_type not in db_url_map:
+        raise ValueError(f"Unknown database type: {db_type}")
+    
+    return create_engine(db_url_map[db_type], connect_args={"connect_timeout": 10})
 
 @st.cache_resource
 def get_connection_pool(db_type: str = "status"):
@@ -105,6 +121,7 @@ def fetch_series_list() -> List[str]:
         return []
     
     preprocessing_pool = get_connection_pool("preprocessing")
+    preprocessing_engine = get_engine("preprocessing")
     if not preprocessing_pool:
         return []
     
@@ -117,7 +134,7 @@ def fetch_series_list() -> List[str]:
             WHERE series_id IS NOT NULL 
             ORDER BY series_id
         """
-        df = pd.read_sql(query, conn)
+        df = pd.read_sql(query, preprocessing_engine)
         return df['series_id'].dropna().tolist()
     except Exception as e:
         st.error(f"❌ Failed to fetch series: {e}")

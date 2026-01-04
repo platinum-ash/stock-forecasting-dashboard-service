@@ -1,5 +1,6 @@
 import sys
 import os
+import json
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)
@@ -313,14 +314,17 @@ def main():
                 try:
                     conn = connection_pool.getconn()
                     query = """
-                    SELECT * FROM time_series_preprocessed 
-                    WHERE series_id = %s 
-                    ORDER BY timestamp DESC LIMIT 100
+                    SELECT * FROM time_series_preprocessed
+                    WHERE series_id = %s
+                    ORDER BY timestamp DESC
+                    LIMIT 100
                     """
                     df = pd.read_sql(query, conn, params=(selected_series,))
                     
                     if not df.empty:
-                        st.line_chart(df.set_index('timestamp')['value'])
+                        df['timestamp'] = pd.to_datetime(df['timestamp'])
+                        # Plot closing price
+                        st.line_chart(df.set_index('timestamp')[['open', 'high', 'low', 'close']])
                         st.dataframe(df, use_container_width=True)
                     else:
                         st.info("No data available for this series")
