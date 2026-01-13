@@ -144,7 +144,7 @@ def fetch_series_list() -> List[str]:
             preprocessing_pool.putconn(conn)
 
 def get_job_history(limit: int = 20) -> pd.DataFrame:
-    """Fetch recent pipeline job history from status database"""
+    """Fetch recent pipeline job history with stage details"""
     status_pool = get_connection_pool("status")
     if not status_pool:
         return pd.DataFrame()
@@ -156,14 +156,15 @@ def get_job_history(limit: int = 20) -> pd.DataFrame:
             SELECT 
                 job_id,
                 series_id,
-                status,
-                stage,
-                created_at,
-                updated_at,
-                EXTRACT(EPOCH FROM (updated_at - created_at)) as duration_seconds,
-                error_message
-            FROM pipeline_jobs
-            ORDER BY created_at DESC
+                overall_status as status,
+                started_at as created_at,
+                completed_at as updated_at,
+                duration_seconds,
+                stages,
+                stage_statuses,
+                completed_stages || '/' || total_stages as progress
+            FROM pipeline_jobs_overview
+            ORDER BY started_at DESC
             LIMIT %s
         """
         df = pd.read_sql(query, conn, params=(limit,))
@@ -175,8 +176,9 @@ def get_job_history(limit: int = 20) -> pd.DataFrame:
         if conn:
             status_pool.putconn(conn)
 
+
 def get_active_jobs() -> pd.DataFrame:
-    """Fetch currently running jobs from status database"""
+    """Fetch currently running jobs with stage breakdown"""
     status_pool = get_connection_pool("status")
     if not status_pool:
         return pd.DataFrame()
@@ -189,11 +191,11 @@ def get_active_jobs() -> pd.DataFrame:
                 job_id,
                 series_id,
                 stage,
-                created_at,
-                EXTRACT(EPOCH FROM (NOW() - created_at)) as running_seconds
-            FROM pipeline_jobs
-            WHERE status = 'running'
-            ORDER BY created_at DESC
+                status,
+                started_at as created_at,
+                running_seconds
+            FROM active_pipeline_jobs_detailed
+            ORDER BY started_at DESC, stage
         """
         df = pd.read_sql(query, conn)
         return df
@@ -203,6 +205,39 @@ def get_active_jobs() -> pd.DataFrame:
     finally:
         if conn:
             status_pool.putconn(conn)
+
+
+def get_job_details(job_id: str) -> pd.DataFrame:
+    """Get detailed stage-by-stage progress for a specific job"""
+    status_pool = get_connection_pool("status")
+    if not status_pool:
+        return pd.DataFrame()
+    
+    conn = None
+    try:
+        conn = status_pool.getconn()
+        query = """
+            SELECT 
+                stage,
+                status,
+                started_at,
+                completed_at,
+                EXTRACT(EPOCH FROM (COALESCE(completed_at, NOW()) - started_at)) as duration_seconds,
+                error_message,
+                metadata
+            FROM pipeline_job_stages
+            WHERE job_id = %s
+            ORDER BY started_at ASC
+        """
+        df = pd.read_sql(query, conn, params=(job_id,))
+        return df
+    except Exception as e:
+        logging.error(f"Failed to fetch job details: {e}")
+        return pd.DataFrame()
+    finally:
+        if conn:
+            status_pool.putconn(conn)
+
 
 def trigger_pipeline(series_id: str, config_data: Dict = None) -> Dict:
     """Trigger pipeline via ingestion service API"""

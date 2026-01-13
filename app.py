@@ -16,7 +16,8 @@ from database import (
     fetch_series_list, 
     get_job_history,
     get_active_jobs,
-    trigger_pipeline
+    trigger_pipeline,
+    get_job_details
 )
 
 # Page config
@@ -221,6 +222,108 @@ def render_metrics_overview():
             label="🔄 Active Jobs",
             value=len(active_df)
         )
+
+def render_job_history():
+    """Render job history table with stage progress"""
+    st.markdown("## 📊 Pipeline History")
+    
+    col1, col2, col3 = st.columns([1, 1, 2])
+    with col1:
+        limit = st.selectbox("Show last", [10, 20, 50, 100], index=1)
+    with col2:
+        if st.button("🔄 Refresh"):
+            st.cache_data.clear()
+            st.rerun()
+    
+    history_df = get_job_history(limit=limit)
+    
+    if history_df.empty:
+        st.info("No job history available")
+    else:
+        # Format duration
+        history_df['duration'] = history_df['duration_seconds'].apply(
+            lambda x: f"{int(x // 60)}m {int(x % 60)}s" if pd.notna(x) and x > 0 else "N/A"
+        )
+        
+        # Status emoji mapping
+        status_emoji = {
+            'completed': '✅',
+            'failed': '❌',
+            'running': '🔄',
+            'partial': '⚠️'
+        }
+        history_df['status_display'] = history_df['status'].map(
+            lambda x: f"{status_emoji.get(x, '⚪')} {x}"
+        )
+        
+        # Create expandable rows for stage details
+        for idx, row in history_df.iterrows():
+            with st.expander(f"🔍 {row['job_id'][:12]}... - {row['series_id']} - {row['status_display']}", expanded=False):
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    st.metric("Duration", row['duration'])
+                with col2:
+                    st.metric("Progress", row['progress'])
+                with col3:
+                    st.metric("Started", row['created_at'].strftime('%H:%M:%S') if pd.notna(row['created_at']) else 'N/A')
+                
+                # Show stage-by-stage breakdown
+                if 'stages' in row and 'stage_statuses' in row:
+                    st.markdown("**Stage Progress:**")
+                    stages = row['stages']
+                    statuses = row['stage_statuses']
+                    
+                    if isinstance(stages, list) and isinstance(statuses, list):
+                        stage_df = pd.DataFrame({
+                            'Stage': stages,
+                            'Status': [f"{status_emoji.get(s, '⚪')} {s}" for s in statuses]
+                        })
+                        st.dataframe(stage_df, use_container_width=True, hide_index=True)
+                    
+                # Fetch detailed stage info
+                job_details = get_job_details(row['job_id'])
+                if not job_details.empty:
+                    st.markdown("**Detailed Timeline:**")
+                    for _, stage_row in job_details.iterrows():
+                        stage_duration = f"{int(stage_row['duration_seconds'] // 60)}m {int(stage_row['duration_seconds'] % 60)}s" if pd.notna(stage_row['duration_seconds']) else "N/A"
+                        status_icon = status_emoji.get(stage_row['status'], '⚪')
+                        st.write(f"{status_icon} **{stage_row['stage']}**: {stage_row['status']} ({stage_duration})")
+                        if pd.notna(stage_row['error_message']):
+                            st.error(f"Error: {stage_row['error_message']}")
+
+
+def render_active_jobs():
+    """Render currently running jobs with stage breakdown"""
+    st.markdown("## 🔄 Active Jobs")
+    
+    active_df = get_active_jobs()
+    
+    if active_df.empty:
+        st.info("No active jobs currently running")
+    else:
+        # Group by job_id to show all stages together
+        for job_id in active_df['job_id'].unique():
+            job_stages = active_df[active_df['job_id'] == job_id]
+            series_id = job_stages.iloc[0]['series_id']
+            
+            with st.container():
+                st.markdown(f"### 🔄 Job: `{job_id[:12]}...` - Series: **{series_id}**")
+                
+                cols = st.columns(len(job_stages))
+                for idx, (_, stage_row) in enumerate(job_stages.iterrows()):
+                    with cols[idx]:
+                        duration = f"{int(stage_row['running_seconds'] // 60)}m {int(stage_row['running_seconds'] % 60)}s" if pd.notna(stage_row['running_seconds']) else "N/A"
+                        
+                        status_icon = '🔄' if stage_row['status'] == 'running' else '⏳'
+                        st.metric(
+                            f"{status_icon} {stage_row['stage'].capitalize()}",
+                            stage_row['status'],
+                            duration
+                        )
+                
+                st.markdown("---")
+
 
 
 def main():
